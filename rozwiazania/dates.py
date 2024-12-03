@@ -8,6 +8,6 @@ def convert_date_to_timezones(date: datetime, timezones: list[str]) -> dict[str,
     return result
 
 
-def is_dst(date: datetime, timezone: str) -> bool:
+def is_dst(date: datetime, timezone: str = "Europe/Warsaw") -> bool:
     tz = ZoneInfo(timezone)
     return date.astimezone(tz).dst() != timedelta(0)
