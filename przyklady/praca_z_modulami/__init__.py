@@ -1,0 +1,1 @@
+print("praca z modulami")
