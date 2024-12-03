@@ -1,0 +1,1 @@
+from testy_z_uzyciem_assert import add
