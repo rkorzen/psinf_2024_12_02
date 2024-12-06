@@ -1,6 +1,3 @@
-# pip install pytest
-# pytest test_rejestracja.py
-
 import pytest
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo

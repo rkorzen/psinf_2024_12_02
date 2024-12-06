@@ -1,90 +1,137 @@
 import csv
 from datetime import datetime, timedelta
-from dates import is_dst
-from collections import defaultdict
+from zoneinfo import ZoneInfo
 from pathlib import Path
 
-TimeSession = dict[str, datetime]
-EmployeesDict = dict[str, list[TimeSession]]
+# Ustalanie bazowego katalogu dla ścieżek plików
+BASE_DIR = Path(__file__).parent
 
-def read_csv(file_path) -> EmployeesDict:
-    result: EmployeesDict = defaultdict(list)
+def is_dst(date: datetime, timezone: str = "Europe/Warsaw") -> bool:
+    """
+    Sprawdza, czy data przypada na czas letni (DST) w określonej strefie czasowej.
 
-    with open(file_path) as f:
-        reader = csv.DictReader(f)
+    :param date: Obiekt datetime (może zawierać FixedOffset).
+    :param timezone: Nazwa strefy czasowej (np. 'Europe/Warsaw').
+    :return: True, jeśli data przypada na czas letni, False w przeciwnym razie.
+    """
+    # Pobranie obiektu strefy czasowej na podstawie nazwy
+    tz = ZoneInfo(timezone)
 
+    # Konwersja daty do pełnoprawnej strefy czasowej
+    # To ważne, ponieważ FixedOffset nie zawiera informacji o DST
+    date_with_tz = date.astimezone(tz)
+
+    # Sprawdzanie różnicy DST: jeśli różnica wynosi timedelta(0), nie jest to czas letni
+    return date_with_tz.tzinfo.dst(date_with_tz) != timedelta(0)
+
+def read_csv(file_path: str) -> dict:
+    """
+    Odczytuje dane z pliku CSV i organizuje je w strukturze danych.
+
+    :param file_path: Ścieżka do pliku CSV.
+    :return: Słownik z danymi pracowników. Klucz to ID, wartość to lista sesji pracy.
+    """
+    employees = {}  # Inicjalizacja słownika, który będzie przechowywać dane pracowników
+
+    # Otwieranie pliku CSV w trybie odczytu
+    with open(file_path, mode='r', encoding='utf-8') as file:
+        reader = csv.DictReader(file)  # Czytanie danych w formacie słownikowym
         for row in reader:
-            employee_id = row["ID"]
-            start_time = datetime.fromisoformat(row["start_time"])
-            end_time = datetime.fromisoformat(row["end_time"])
+            employee_id = row['ID']  # Pobieranie ID pracownika z wiersza
+            start_time = datetime.fromisoformat(row['start_time'])  # Konwersja daty rozpoczęcia na obiekt datetime
+            end_time = datetime.fromisoformat(row['end_time'])  # Konwersja daty zakończenia na obiekt datetime
 
-            result[employee_id].append({
+            # Dodawanie nowego pracownika do słownika, jeśli nie istnieje
+            if employee_id not in employees:
+                employees[employee_id] = []
+
+            # Dodanie sesji pracy do listy pracownika
+            employees[employee_id].append({
                 "start": start_time,
                 "end": end_time
             })
-    return result
+    
+    return employees  # Zwracanie słownika z danymi
 
-def get_duration(session: TimeSession) -> tuple[datetime, datetime, timedelta]:
+def get_duration(session: dict) -> tuple[datetime, datetime, timedelta]:
+    """
+    Oblicza czas trwania sesji pracy.
+
+    :param session: Słownik zawierający dane sesji pracy (start, end).
+    :return: Krotka z datą rozpoczęcia, zakończenia i czasem trwania sesji.
+    """
     start = session["start"]
     end = session["end"]
-    duration = end - start
+    duration = end - start  # Obliczanie różnicy między start a end
     return start, end, duration
 
-def fmt_date(date: datetime) -> str:
-    return date.strftime("%Y-%m-%d %H:%M:%S %Z")
-
-def generate_detailed_report(employee_id: str, data: EmployeesDict):
+def partial_report(session: dict) -> None:
     """
-    Raport szczegółowy dla pracownika ID 001:
-    - 2024-06-15 08:30:00 CEST -> 2024-06-15 16:30:00 CEST (Czas trwania: 8:00:00, DST: Tak)
-    - 2024-12-15 08:30:00 CET -> 2024-12-15 16:30:00 CET (Czas trwania: 8:00:00, DST: Nie)
-    Łączny czas pracy: 16 godzin i 0 minut.
-    
-    """
+    Wypisuje szczegóły jednej sesji pracy.
 
+    :param session: Słownik z danymi sesji pracy.
+    """
+    start, end, duration = get_duration(session)
+    is_summer_time = is_dst(start) or is_dst(end)  # Sprawdzenie, czy start lub end przypada na czas letni
+    print(f"  - {start.strftime('%Y-%m-%d %H:%M:%S %Z')} -> {end.strftime('%Y-%m-%d %H:%M:%S %Z')} "
+          f"(Czas trwania: {duration}, DST: {'Tak' if is_summer_time else 'Nie'})")
+
+def generate_detailed_report(employee_id: str, data: dict) -> None:
+    """
+    Generuje szczegółowy raport dla wybranego pracownika.
+
+    :param employee_id: ID pracownika.
+    :param data: Słownik z danymi pracowników.
+    """
+    if employee_id not in data:
+        print(f"Pracownik o ID {employee_id} nie istnieje.")
+        return
+
+    sessions = data[employee_id]  # Pobieranie sesji pracy pracownika
     print(f"Raport szczegółowy dla pracownika ID {employee_id}:")
+    total_duration = timedelta()  # Zmienna do sumowania czasu pracy
 
-    sessions = data[employee_id]
-
+    # Iterowanie po sesjach pracy i generowanie raportu dla każdej
     for session in sessions:
-        start, end, duration = get_duration(session)
-        is_summer_time = is_dst(start) or is_dst(end)
-        print(f"{fmt_date(start)} -> {fmt_date(end)} (Czas trwania: {duration}, DST: {'Tak' if is_summer_time else 'Nie'})")
+        partial_report(session)
 
-def generate_summary_report(data: EmployeesDict):
+    # Obliczanie całkowitego czasu pracy
+    hours, remainder = divmod(total_duration.total_seconds(), 3600)
+    minutes = remainder // 60
+    print(f"Łączny czas pracy: {int(hours)} godzin i {int(minutes)} minut.\n")
+
+def generate_summary_report(data: dict) -> None:
+    """
+    Generuje zbiorczy raport dla wszystkich pracowników.
+
+    :param data: Słownik z danymi pracowników.
+    """
+    print("Zbiorczy raport dla wszystkich pracowników:")
     for employee_id, sessions in data.items():
-        
+        total_duration = timedelta()  # Zmienna na łączny czas pracy
+        dst_duration = timedelta()  # Zmienna na czas pracy w DST
 
-        total_duration = timedelta()
-        dst_duration = timedelta()
-
+        # Iterowanie po sesjach pracy i sumowanie czasu
         for session in sessions:
             start, end, duration = get_duration(session)
             total_duration += duration
-            if is_dst(start) or is_dst(end):
+            if is_dst(start) or is_dst(end):  # Sprawdzanie, czy sesja przypada na DST
                 dst_duration += duration
 
-        non_dst_duration = total_duration - dst_duration
-        
-        total_hours, total_minutes = divmod(total_duration.seconds, 3600)
-        total_minutes = total_minutes // 60
+        non_dst_duration = total_duration - dst_duration  # Czas pracy poza DST
+        total_hours, total_minutes = divmod(total_duration.total_seconds(), 3600)
+        dst_hours, dst_minutes = divmod(dst_duration.total_seconds(), 3600)
+        non_dst_hours, non_dst_minutes = divmod(non_dst_duration.total_seconds(), 3600)
 
-        dst_hours, dst_minutes = divmod(dst_duration.seconds, 3600)
-        dst_minutes = dst_minutes // 60
+        # Wypisanie podsumowania dla pracownika
+        print(f"Pracownik ID {employee_id}:")
+        print(f"  - Łączny czas pracy: {int(total_hours)} godzin i {int(total_minutes) // 60} minut.")
+        print(f"  - Czas pracy w DST: {int(dst_hours)} godzin i {int(dst_minutes) // 60} minut.")
+        print(f"  - Czas pracy poza DST: {int(non_dst_hours)} godzin i {int(non_dst_minutes) // 60} minut.\n")
 
-        non_dst_hours, non_dst_minutes = divmod(non_dst_duration.seconds, 3600)
-        non_dst_minutes = non_dst_minutes // 60
+# Odczytanie danych z pliku CSV
+data = read_csv(BASE_DIR.parent / "materialy" / "dane" / "work_sessions.csv")
 
-
-        print(f"Pracownik ID {employee_id}")
-        print(f"  - Łączny czas pracy: {total_hours} godzin i {total_minutes} minut.")
-        print(f"  - Czas pracy w DST: {dst_hours} godzin i {dst_minutes} minut.")
-        print(f"  - Czas pracy poza DST: {non_dst_hours} godzin i {non_dst_minutes} minut.")
-
-
-if __name__ == "__main__":
-    BASE_DIR = Path(__file__).parent.parent
-    data_file = BASE_DIR / "dane" / "work_sessions.csv"
-    data = read_csv(data_file)
-    generate_detailed_report("001", data)
-    generate_summary_report(data)
+# Generowanie raportów
+generate_detailed_report("001", data)
+generate_summary_report(data)

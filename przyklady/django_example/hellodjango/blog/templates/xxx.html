@@ -1,0 +1,12 @@
+{% extends "base.html" %}
+
+{% block title %} Strona xxx {% endblock %}
+
+{% block content %}
+    <h1>Hello, {{ klucz }}!</h1>
+    <div class="row">
+    {% for item in lista %}
+        <div class="col-4">{{ item|upper }}</div>
+    {% endfor %}
+    </div>
+{% endblock %}
